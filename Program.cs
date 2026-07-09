@@ -117,8 +117,9 @@ public class Program
     private static async Task PlayEpisode(string path)
     {
         ProcessStartInfo startInfo = new ProcessStartInfo();
-        startInfo.FileName = "vlc";
-        startInfo.Arguments = $"--http-referrer={megaplaySource} \"{path}\"";
+        startInfo.FileName = "mpv";
+        // startInfo.Arguments = $"--http-referrer={megaplaySource} \"{path}\"";
+        startInfo.Arguments = $"--referrer={megaplaySource} \"{path}\"";
 
         Process.Start(startInfo);
     }
@@ -155,7 +156,7 @@ public class Program
         for (int i = 0; i < animeList.Count; i++)
         {
             var anime = animeList[i];
-            Console.WriteLine($"{i}) {anime.Name}");
+            Console.WriteLine($"{i + 1}) {anime.Name}");
         }
 
         Console.WriteLine("Select an anime: ");
@@ -166,13 +167,14 @@ public class Program
             string? input = Console.ReadLine()?.Trim();
             int.TryParse(input, out index);
 
-            if (index < 0 || index > animeList.Count - 1)
+            if (index < 1 || index > animeList.Count)
             {
                 Console.WriteLine("Invalid input. Please try again.");
             }
             else
                 valid = true;
         }
+        index--;
 
         await SetNumEpisodes(animeList[index]);
 
