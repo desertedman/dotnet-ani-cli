@@ -1,6 +1,4 @@
 ﻿using System.Diagnostics;
-using System.Net;
-using System.Net.Http.Headers;
 using System.Text.Json.Nodes;
 using HtmlAgilityPack;
 using Microsoft.AspNetCore.WebUtilities;
@@ -22,6 +20,27 @@ public class Program
     private const string clientKey = "6114d00ca681b7701d1e15fe11a4987e";
     private static HttpClient sharedClient = new();
 
+    private static async Task<String> BuildAndSendRequest(
+        string path,
+        Dictionary<string, string?>? headers
+    )
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
+        if (headers != null)
+        {
+            foreach (var (key, value) in headers)
+            {
+                request.Headers.Add(key, value);
+            }
+        }
+
+        using var response = await sharedClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        string content = await response.Content.ReadAsStringAsync();
+
+        return content;
+    }
+
     private static async Task<HtmlDocument> GetHtml(string path)
     {
         using HttpResponseMessage response = await sharedClient.GetAsync(path);
@@ -39,18 +58,11 @@ public class Program
         List<AnimeResult> animeList = new();
         var queryParams = new Dictionary<string, string?> { { "q", title } };
         string fullUrl = QueryHelpers.AddQueryString($"{malAPI}anime", queryParams);
-        // Console.WriteLine($"Request: {fullUrl}");
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, fullUrl);
-        request.Headers.Add("X-MAL-Client-ID", clientKey);
-
-        using var response = await sharedClient.SendAsync(request);
-        response.EnsureSuccessStatusCode();
-
-        string jsonString = await response.Content.ReadAsStringAsync();
+        var headers = new Dictionary<string, string?> { { "X-MAL-Client-ID", clientKey } };
+        var jsonString = await BuildAndSendRequest(fullUrl, headers);
         JsonNode rootNode = JsonNode.Parse(jsonString)!;
 
-        // Console.WriteLine(rootNode);
         JsonArray dataArray = rootNode["data"]!.AsArray();
 
         foreach (JsonNode? item in dataArray)
@@ -63,19 +75,14 @@ public class Program
         return animeList;
     }
 
-    private static async Task GetNumEpisodes(AnimeResult anime)
+    private static async Task SetNumEpisodes(AnimeResult anime)
     {
         var queryParams = new Dictionary<string, string?> { { "fields", "num_episodes" } };
         string fullUrl = QueryHelpers.AddQueryString($"{malAPI}anime/{anime.ID}", queryParams);
         // Console.WriteLine($"Request: {fullUrl}");
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, fullUrl);
-        request.Headers.Add("X-MAL-Client-ID", clientKey);
-
-        using var response = await sharedClient.SendAsync(request);
-        response.EnsureSuccessStatusCode();
-
-        string jsonString = await response.Content.ReadAsStringAsync();
+        var headers = new Dictionary<string, string?> { { "X-MAL-Client-ID", clientKey } };
+        var jsonString = await BuildAndSendRequest(fullUrl, headers);
         JsonNode rootNode = JsonNode.Parse(jsonString)!;
 
         anime.NumEpisodes = rootNode["num_episodes"]!.GetValue<int>();
@@ -84,33 +91,23 @@ public class Program
     private static async Task<String> GetSources(AnimeResult anime, int episode)
     {
         var fullUrl = $"{megaplaySource}stream/mal/{anime.ID}/{episode}/sub";
-        var html = await GetHtml(fullUrl);
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, fullUrl);
-        request.Headers.Add("Referer", megaplaySource);
         // request.Headers.Add("user_agent", megaplaySource);
+        var headers = new Dictionary<string, string?> { { "Referer", megaplaySource } };
+        var htmlString = await BuildAndSendRequest(fullUrl, headers);
 
-        using var response = await sharedClient.SendAsync(request);
-        response.EnsureSuccessStatusCode();
-
-        string content = await response.Content.ReadAsStringAsync();
         HtmlDocument doc = new HtmlDocument();
-        doc.LoadHtml(content);
+        doc.LoadHtml(htmlString);
 
+        // Scrape Megaplay html for data-id
         var id = doc
             .DocumentNode.SelectSingleNode("//div[@id='megaplay-player']")
             .GetAttributeValue("data-id", "");
 
         // Download sources
         fullUrl = $"{megaplaySource}stream/getSources?id={id}";
-        using var newRequest = new HttpRequestMessage(HttpMethod.Get, fullUrl);
-        newRequest.Headers.Add("Referer", megaplaySource);
-
-        using var newResponse = await sharedClient.SendAsync(newRequest);
-        newResponse.EnsureSuccessStatusCode();
-
-        string jsonSources = await newResponse.Content.ReadAsStringAsync();
-        JsonNode rootNode = JsonNode.Parse(jsonSources)!;
+        string jsonString = await BuildAndSendRequest(fullUrl, headers);
+        JsonNode rootNode = JsonNode.Parse(jsonString)!;
         // Console.WriteLine(rootNode);
 
         string fileSource = rootNode["sources"]!["file"]!.ToString();
@@ -119,20 +116,11 @@ public class Program
 
     private static async Task PlayEpisode(string path)
     {
-        var doc = await GetHtml(path);
+        ProcessStartInfo startInfo = new ProcessStartInfo();
+        startInfo.FileName = "vlc";
+        startInfo.Arguments = $"--http-referrer={megaplaySource} \"{path}\"";
 
-        var item = doc.DocumentNode.SelectSingleNode(@"//iframe");
-        // var item = doc.DocumentNode.SelectSingleNode(@"//iframe[@label='Video player']");
-
-        Console.WriteLine(item.OuterHtml);
-
-        if (item != null)
-        {
-            var link = item.GetAttributeValue("src", "");
-            Console.WriteLine(@link);
-        }
-        else
-            Console.WriteLine("Could not find link");
+        Process.Start(startInfo);
     }
 
     public static async Task Main(string[] args)
@@ -186,7 +174,7 @@ public class Program
                 valid = true;
         }
 
-        await GetNumEpisodes(animeList[index]);
+        await SetNumEpisodes(animeList[index]);
 
         valid = false;
         int episode = -1;
@@ -209,10 +197,6 @@ public class Program
         Console.WriteLine(source);
 
         // Launch app
-        ProcessStartInfo startInfo = new ProcessStartInfo();
-        startInfo.FileName = "vlc";
-        startInfo.Arguments = $"--http-referrer={megaplaySource} \"{source}\"";
-
-        Process.Start(startInfo);
+        await PlayEpisode(source);
     }
 }
