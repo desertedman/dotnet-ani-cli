@@ -267,7 +267,7 @@ public class Program
                 Console.WriteLine(defaultTrack.Label);
             }
             else
-                Console.WriteLine("No tracks found.");
+                Console.WriteLine("No subtitle tracks found.");
 
             // Launch app
             await PlayEpisode(fileSource.Source!.File, defaultTrack);
