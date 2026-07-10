@@ -179,7 +179,10 @@ public class Program
     {
         string fullUrl = $"{malBase}anime/{anime.ID}/";
         List<String> episodeList = new();
+        await SetNumEpisodes(anime);
+        episodeList.Capacity = anime.NumEpisodes;
 
+        // Scrape MAL website for episode names
         try
         {
             // Parse out name to use in URL
@@ -191,7 +194,7 @@ public class Program
                 .InnerText;
             var encodedTitle = Uri.EscapeDataString(rawTitle);
 
-            // Construct new URL to scrape episodes list
+            // Construct new URL to scrape episode list
             fullUrl = $"{malBase}anime/{anime.ID}/{encodedTitle}/episode";
             htmlString = await BuildAndSendRequest(fullUrl, null);
             doc.LoadHtml(htmlString);
@@ -201,15 +204,14 @@ public class Program
                 episodeList.Add(WebUtility.HtmlDecode(node.InnerText));
             }
         }
+        // Scraping MAL website fails
         catch (HttpRequestException ex)
         {
             Console.WriteLine($"EXCEPTION CAUGHT: {ex.Message}");
-            Console.WriteLine(
-                "Scraping MAL website failed; falling back to API. This means generic episode names."
-            );
+            Console.WriteLine("Failed to get episode names. Generic episode names displayed.");
 
-            await SetNumEpisodes(anime);
             episodeList.Clear();
+            episodeList.Capacity = anime.NumEpisodes;
             for (int i = 1; i <= anime.NumEpisodes; i++)
             {
                 episodeList.Add($"Episode {i}");
@@ -370,9 +372,9 @@ public class Program
                     Console.Write("Select a track: ");
                     trackIndex = MakeSelection(fileSource.trackList!, true);
                 }
+                // Select default track
                 else
                 {
-                    // Select default track
                     if (fileSource.trackList!.Count > 0)
                     {
                         for (int i = 0; i < fileSource.trackList!.Count; i++)
