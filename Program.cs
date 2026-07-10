@@ -66,6 +66,7 @@ struct Info
 {
     public string OS { get; set; }
     public string Player { get; set; }
+    public string Path { get; set; }
 }
 
 public class Program
@@ -86,11 +87,12 @@ public class Program
             bool programFound = false;
             foreach (var player in Players)
             {
+                // Test for program
                 using var process = new Process();
                 process.StartInfo = new ProcessStartInfo
                 {
                     FileName = "which",
-                    Arguments = "mpv",
+                    Arguments = player,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
@@ -99,36 +101,35 @@ public class Program
 
                 process.Start();
                 process.WaitForExit();
+
+                if (process.ExitCode == 0)
+                {
+                    Console.WriteLine($"{player} detected. Using {player}.");
+                    Info.Player = player;
+                    programFound = true;
+                    break;
+                }
             }
 
-            // Test for program
-
-            if (File.Exists("mpv"))
+            if (!programFound)
             {
-                Info.Player = "mpv";
-            }
-            else if (File.Exists("vlc"))
-            {
-                Info.Player = "vlc";
-            }
-            else
-            {
-                Console.WriteLine("No player found!");
+                Console.WriteLine("No supported player detected. Exiting.");
+                Environment.Exit(1);
             }
         }
-        else if (OperatingSystem.IsWindows())
-        {
-            Info.OS = "Windows";
-
-            if (File.Exists("mpv"))
-            {
-                Info.Player = "mpv";
-            }
-            else if (File.Exists("vlc"))
-            {
-                Info.Player = "vlc";
-            }
-        }
+        // else if (OperatingSystem.IsWindows())
+        // {
+        //     Info.OS = "Windows";
+        //
+        //     if (File.Exists("mpv"))
+        //     {
+        //         Info.Player = "mpv";
+        //     }
+        //     else if (File.Exists("vlc"))
+        //     {
+        //         Info.Player = "vlc";
+        //     }
+        // }
     }
 
     private static async Task<String> BuildAndSendRequest(
@@ -287,7 +288,7 @@ public class Program
             if (track != null)
             {
                 launchArgs +=
-                    $"--sub-file=\"{track.File}\" --title=\"{episodeName} ({track.Label})\"";
+                    $" --sub-file=\"{track.File}\" --title=\"{episodeName} ({track.Label})\"";
             }
         }
         else if (Info.Player == "vlc")
@@ -296,7 +297,7 @@ public class Program
             if (track != null)
             {
                 launchArgs +=
-                    $"--sub-file=\"{track.File}\" --meta-title=\"{episodeName} ({track.Label})\"";
+                    $" --sub-file=\"{track.File}\" --meta-title=\"{episodeName} ({track.Label})\"";
             }
         }
 
@@ -311,6 +312,7 @@ public class Program
         string launchArgs = BuildLaunchArgs(path, track, episodeName);
         startInfo.Arguments = launchArgs;
 
+        Console.WriteLine($"EXECUTING: {startInfo.FileName} {startInfo.Arguments}");
         Process process = Process.Start(startInfo)!;
         process.WaitForExit();
     }
