@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -71,7 +72,7 @@ public class Program
 {
     private const string megaplaySource = "https://megaplay.buzz/";
     private const string malAPI = "https://api.myanimelist.net/v2/";
-    private const string jikanAPI = "https://api.jikan.moe/v4/";
+    private const string malBase = "https://myanimelist.net/";
     private const string clientKey = "6114d00ca681b7701d1e15fe11a4987e";
     private static HttpClient sharedClient = new();
     private static Info Info;
@@ -176,16 +177,43 @@ public class Program
 
     private static async Task<List<String>> GetEpisodes(AnimeResult anime)
     {
-        string fullUrl = $"{jikanAPI}anime/{anime.ID}/episodes";
-
-        var jsonString = await BuildAndSendRequest(fullUrl, null);
-        JsonNode rootNode = JsonNode.Parse(jsonString)!;
-
+        string fullUrl = $"{malBase}anime/{anime.ID}/";
         List<String> episodeList = new();
-        var dataArray = rootNode["data"]!.AsArray();
-        foreach (var episode in dataArray)
+
+        try
         {
-            episodeList.Add(episode!["title"]!.ToString());
+            // Parse out name to use in URL
+            var htmlString = await BuildAndSendRequest(fullUrl, null);
+            HtmlDocument doc = new();
+            doc.LoadHtml(htmlString);
+            var rawTitle = doc
+                .DocumentNode.SelectSingleNode("//h1[@class='title-name h1_bold_none']")
+                .InnerText;
+            var encodedTitle = Uri.EscapeDataString(rawTitle);
+
+            // Construct new URL to scrape episodes list
+            fullUrl = $"{malBase}anime/{anime.ID}/{encodedTitle}/episode";
+            htmlString = await BuildAndSendRequest(fullUrl, null);
+            doc.LoadHtml(htmlString);
+            var nodes = doc.DocumentNode.SelectNodes(@"//a[@class='fl-l fw-b ']");
+            foreach (var node in nodes)
+            {
+                episodeList.Add(WebUtility.HtmlDecode(node.InnerText));
+            }
+        }
+        catch (HttpRequestException ex)
+        {
+            Console.WriteLine($"EXCEPTION CAUGHT: {ex.Message}");
+            Console.WriteLine(
+                "Scraping MAL website failed; falling back to API. This means generic episode names."
+            );
+
+            await SetNumEpisodes(anime);
+            episodeList.Clear();
+            for (int i = 1; i <= anime.NumEpisodes; i++)
+            {
+                episodeList.Add($"Episode {i}");
+            }
         }
 
         return episodeList;
@@ -322,6 +350,10 @@ public class Program
         Console.Write("Select an anime: ");
         int animeIndex = MakeSelection(animeList, true);
         var episodeList = await GetEpisodes(animeList[animeIndex]);
+        foreach (var ep in episodeList)
+        {
+            Console.WriteLine(ep);
+        }
         int episode = 0;
 
         while (true)
