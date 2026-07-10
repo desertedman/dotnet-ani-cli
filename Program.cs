@@ -83,7 +83,7 @@ public class Program
         bool programFound = false;
         Console.WriteLine("Detecting player...");
 
-        if (OperatingSystem.IsLinux())
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
         {
             foreach (var player in Players)
             {

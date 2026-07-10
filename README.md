@@ -17,6 +17,8 @@ Scrapes the MyAnimeList API for search results (and their website for episode na
 
 VLC support is a work in progress. The episode will stream, but subtitles will not work.
 
+May or may not work on MacOS, YMMV. I do not actively support Mac.
+
 ## Running
 
 ```bash
