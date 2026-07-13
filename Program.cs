@@ -6,7 +6,7 @@ using System.Text.Json.Serialization;
 using HtmlAgilityPack;
 using Microsoft.AspNetCore.WebUtilities;
 
-class AnimeResult
+public class AnimeResult
 {
     public string Name { get; set; } = "";
     public string Url { get; set; } = "";
@@ -20,7 +20,7 @@ class AnimeResult
 }
 
 // Recreate JSON structure of megaplay
-class Track
+public class Track
 {
     [JsonPropertyName("file")]
     public string File { get; set; } = "";
@@ -68,6 +68,157 @@ struct Info
     public string Path { get; set; }
 }
 
+public enum PlayerID
+{
+    PLAYER_MPV,
+    PLAYER_VLC,
+}
+
+public abstract class Player
+{
+    public int Program { get; set; }
+    protected List<String> LaunchArgs { get; } = new();
+    private string _path = "";
+
+    protected virtual string Path
+    {
+        get => _path;
+        set => _path = value;
+    }
+
+    public abstract void BuildReferrer(string source);
+
+    public abstract void BuildSubtitles(Track track);
+
+    public abstract void BuildTitle(AnimeResult anime, string episodeName, int episodeNr);
+
+    public abstract void BuildSource(string path);
+
+    public abstract ProcessStartInfo GetProcessStartInfo();
+}
+
+public class MpvPlayer : Player
+{
+    public MpvPlayer()
+    {
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+        {
+            base.Path = "mpv";
+        }
+        else if (OperatingSystem.IsWindows())
+        {
+            base.Path = @"C:\Program Files\MPV Player\mpv.exe";
+        }
+    }
+
+    public override void BuildReferrer(string source)
+    {
+        LaunchArgs.Add($"--referrer=\"{source}\"");
+    }
+
+    public override void BuildSubtitles(Track track)
+    {
+        if (track != null)
+        {
+            LaunchArgs.Add($"--sub-file=\"{track.File}\"");
+        }
+    }
+
+    public override void BuildTitle(AnimeResult anime, string episodeName, int episodeNr)
+    {
+        LaunchArgs.Add($"--title=\"{anime.Name} - {episodeNr}) {episodeName}\"");
+    }
+
+    public override void BuildSource(string path)
+    {
+        LaunchArgs.Add($"\"{path}\"");
+    }
+
+    public override ProcessStartInfo GetProcessStartInfo()
+    {
+        ProcessStartInfo startInfo = new ProcessStartInfo { FileName = Path };
+        string arglist = "";
+        foreach (var arg in LaunchArgs)
+        {
+            arglist = $"{arglist} {arg}";
+        }
+        startInfo.Arguments = arglist;
+
+        return startInfo;
+    }
+}
+
+public class VlcPlayer : Player
+{
+    protected override string Path
+    {
+        get => base.Path;
+        set
+        {
+            if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+            {
+                base.Path = "vlc";
+            }
+            else if (OperatingSystem.IsWindows())
+            {
+                base.Path = @"C:\Program Files\VideoLAN\VLC\vlc.exe";
+            }
+        }
+    }
+
+    public override void BuildReferrer(string source)
+    {
+        LaunchArgs.Add($"--http-referrer={source}");
+    }
+
+    public override void BuildSubtitles(Track track)
+    {
+        throw new NotImplementedException();
+        //     if (track != null)
+        //     {
+        //         LaunchArgs.Add($"--sub-file=\"{track.File}\"");
+        //     }
+    }
+
+    public override void BuildTitle(AnimeResult anime, string episodeName, int episodeNr)
+    {
+        LaunchArgs.Add($"--meta-title=\"{anime.Name} - {episodeNr}) {episodeName}");
+    }
+
+    public override void BuildSource(string path)
+    {
+        LaunchArgs.Add(path);
+    }
+
+    public override ProcessStartInfo GetProcessStartInfo()
+    {
+        ProcessStartInfo startInfo = new ProcessStartInfo { FileName = Path };
+        foreach (var arg in LaunchArgs)
+        {
+            startInfo.ArgumentList.Add(arg);
+        }
+
+        return startInfo;
+    }
+}
+
+public class PlayerFactory
+{
+    public static Player CreatePlayer(PlayerID program)
+    {
+        switch (program)
+        {
+            case PlayerID.PLAYER_MPV:
+                return new MpvPlayer();
+            case PlayerID.PLAYER_VLC:
+                return new VlcPlayer();
+
+            default:
+                return null!;
+        }
+    }
+}
+
 public class Program
 {
     private const string megaplaySource = "https://megaplay.buzz/";
@@ -77,6 +228,7 @@ public class Program
     private static HttpClient sharedClient = new();
     private static Info Info;
     private static List<String> Players = new List<String> { "mpv", "vlc" };
+    private static Player? _player;
 
     private static void Configure()
     {
@@ -151,6 +303,8 @@ public class Program
             }
         }
 
+        Console.WriteLine($"Request: {request.RequestUri!.AbsoluteUri}");
+        // Console.WriteLine($"Request: {request.ToString()}");
         using var response = await sharedClient.SendAsync(request);
         response.EnsureSuccessStatusCode();
         string content = await response.Content.ReadAsStringAsync();
@@ -229,9 +383,19 @@ public class Program
             htmlString = await BuildAndSendRequest(fullUrl, null);
             doc.LoadHtml(htmlString);
             var nodes = doc.DocumentNode.SelectNodes(@"//a[@class='fl-l fw-b ']");
-            foreach (var node in nodes)
+            try
             {
-                episodeList.Add(WebUtility.HtmlDecode(node.InnerText));
+                foreach (var node in nodes)
+                {
+                    episodeList.Add(WebUtility.HtmlDecode(node.InnerText));
+                }
+            }
+            catch (NullReferenceException ex)
+            {
+                // TODO:: Add fix for episodes not listed in MAL page. Example: Blue Lock Neo Egoist League
+                Console.WriteLine($"EXCEPTION CAUGHT: {ex.Message}");
+                Console.WriteLine("Failed to get HTML element; probably 404?");
+                Environment.Exit(1);
             }
         }
         // Scraping MAL website fails
@@ -381,8 +545,6 @@ public class Program
 
     public static async Task Main(string[] args)
     {
-        Configure();
-
         List<AnimeResult> animeList = new();
         bool valid = false;
 
@@ -474,13 +636,27 @@ public class Program
             int actualEpisodeIndex = episode - 1;
             Console.WriteLine($"Accessing episode {episode}: {episodeList[actualEpisodeIndex]}");
 
-            // Launch app
-            await PlayEpisode(
-                fileSource.Source!.File,
-                chosenTrack,
-                episodeList[actualEpisodeIndex],
-                animeList[animeIndex]
-            );
+            if (args.Contains("--v"))
+            {
+                _player = PlayerFactory.CreatePlayer(PlayerID.PLAYER_VLC);
+            }
+            else
+            {
+                _player = PlayerFactory.CreatePlayer(PlayerID.PLAYER_MPV);
+            }
+
+            _player.BuildReferrer(megaplaySource);
+            _player.BuildSource(fileSource.Source!.File);
+            _player.BuildSubtitles(chosenTrack);
+            _player.BuildTitle(animeList[animeIndex], episodeList[actualEpisodeIndex], episode);
+            ProcessStartInfo startInfo = _player.GetProcessStartInfo();
+            // Console.Write($"EXECUTING: {startInfo.FileName}");
+            // foreach (var arg in startInfo.ArgumentList)
+            // {
+            //     Console.WriteLine($"[{arg}]");
+            // }
+            Process process = Process.Start(startInfo)!;
+            process.WaitForExit();
         }
     }
 }
