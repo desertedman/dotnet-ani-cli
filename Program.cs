@@ -425,6 +425,7 @@ public class Program
 
         HtmlDocument doc = new HtmlDocument();
         doc.LoadHtml(htmlString);
+        doc.Save("debug.html");
 
         // Scrape Megaplay html for data-id
         var id = doc
@@ -435,7 +436,8 @@ public class Program
         fullUrl = $"{megaplaySource}stream/getSources?id={id}";
         string jsonString = await BuildAndSendRequest(fullUrl, headers);
         JsonNode rootNode = JsonNode.Parse(jsonString)!;
-        // Console.WriteLine(rootNode);
+        var options = new JsonSerializerOptions { WriteIndented = true };
+        Console.WriteLine(rootNode.ToJsonString(options));
 
         // Deserialize json
         FileSource fileSource = rootNode.Deserialize<FileSource>()!;
@@ -517,7 +519,10 @@ public class Program
             }
             Console.WriteLine("\n\n\n[Up]/[K] to go up, [Down]/[J] to go down, [Enter] to select");
 
-            ConsoleKey key = Console.ReadKey(true).Key;
+            // Change to make it friendly for debuggers; revert later
+            var value = Console.Read();
+            ConsoleKey key = (ConsoleKey)value;
+            // ConsoleKey key = Console.ReadKey(true).Key;
 
             if (key == ConsoleKey.UpArrow || key == ConsoleKey.K)
             {
@@ -533,7 +538,7 @@ public class Program
                     selectionIndex++;
                 }
             }
-            else if (key == ConsoleKey.Enter)
+            else if (key == ConsoleKey.Enter || key == ConsoleKey.L)
             {
                 if (shouldOffset)
                     return selectionIndex;
